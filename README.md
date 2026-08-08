@@ -17,4 +17,4 @@ PNGTube Ultimate is a program for creating virtual PNG avatars with the ability 
 
 If you like the program and want to support its development:
 
-[Donate via DonationAlerts]https://dalink.to/ksjakag
+[Donate via DonationAlerts](https://dalink.to/ksjakag)
