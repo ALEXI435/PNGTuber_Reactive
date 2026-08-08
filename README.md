@@ -1,5 +1,7 @@
 # PNGTube-Ultimate
 
+[![Download](https://img.shields.io/github/v/release/ALEXI435/PNGTube-Ultimate?label=Download&style=for-the-badge)](https://github.com/ALEXI435/PNGTube-Ultimate/releases/latest)
+
 ## About
 
 PNGTube Ultimate is a program for creating virtual PNG avatars with the ability to change the displayed image based on **volume**, **pitch**, or a combination of both.
