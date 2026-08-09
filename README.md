@@ -13,6 +13,8 @@ PNGTube Ultimate is a program for creating virtual PNG avatars with the ability 
 * Customizable blinking for every state and Idle
 * Select the audio device directly in the program
 
+[Video instruction](https://youtu.be/tirxuUyyAHg?si=bXIIuWCCMYIlhiM2)
+
 ## Support
 
 If you like the program and want to support its development:
