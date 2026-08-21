@@ -22,7 +22,7 @@ def x_to_db(x, track_min_px, track_max_px):
 
 
 def hz_to_y(hz, track_min_px, track_max_px):
-    """Гц по вертикали — больше значение выше (меньше y в пикселях)."""
+    """Hz vertically — higher value is higher (lower y in pixels)."""
     ratio = (clamp(hz, HZ_MIN, HZ_MAX) - HZ_MIN) / (HZ_MAX - HZ_MIN)
     return track_max_px - ratio * (track_max_px - track_min_px)
 
@@ -35,7 +35,7 @@ def y_to_hz(y, track_min_px, track_max_px):
 
 
 def hz_to_x(hz, track_min_px, track_max_px):
-    """Для 1D-шкалы тона (горизонтальная ось, не вертикальная как в комбо)."""
+    """For 1D pitch scale (horizontal axis, not vertical like in combo)."""
     ratio = (clamp(hz, HZ_MIN, HZ_MAX) - HZ_MIN) / (HZ_MAX - HZ_MIN)
     return track_min_px + ratio * (track_max_px - track_min_px)
 
@@ -48,7 +48,7 @@ def x_to_hz(x, track_min_px, track_max_px):
 
 
 def ticks(minor_step, major_step, value_min, value_max):
-    """Возвращает список (value, is_major) для отрисовки насечек шкалы."""
+    """Returns list of (value, is_major) for drawing scale ticks."""
     result = []
     value = value_min
     while value <= value_max + 1e-9:

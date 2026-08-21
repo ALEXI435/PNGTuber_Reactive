@@ -1,9 +1,11 @@
+import math
 import os
 import random
 import time
 import tkinter as tk
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
+from config import auto_save
 
 CHROMA_KEY_COLOR = "#00FF00"
 
@@ -13,9 +15,9 @@ ZOOM_MAX = 5.0
 
 
 def _make_media_offline_image(width, height):
-    """Генерирует плейсхолдер в духе DaVinci Resolve 'Media Offline' —
-    шахматный паттерн + подпись. Ничего не хранится на диске, картинка
-    рисуется программно через Pillow каждый раз, когда нужна.
+    """Generates DaVinci Resolve style 'Media Offline' placeholder —
+    checkerboard pattern + label. Nothing stored on disk, image is
+    drawn programmatically via Pillow each time needed.
     """
     width = max(width, 1)
     height = max(height, 1)
@@ -56,15 +58,15 @@ def _make_media_offline_image(width, height):
 
 
 class AvatarWindow:
-    """Отдельное окно с фиксированным зелёным фоном (хромакей для OBS Window
-    Capture). Показывает normal/blink картинку текущего активного состояния
-    (или idle, если состояние не выбрано) в её естественном размере (с учётом
-    зума), без растягивания под размер окна. Если окно меньше картинки — она
-    просто обрезается по краям окна (canvas делает это сам). Если путь к
-    картинке битый — показывает Media Offline вместо краша.
+    """Separate window with fixed green background (chroma key for OBS Window
+    Capture). Shows normal/blink image of current active state
+    (or idle if no state selected) in its natural size (with zoom),
+    without stretching to window size. If window is smaller than image —
+    it's simply cropped at window edges (canvas does this automatically).
+    If image path is broken — shows Media Offline instead of crash.
 
-    Зум (колесо мыши) и пан (зажатая ЛКМ + движение) — глобальные параметры,
-    применяются одинаково ко всем картинкам и сохраняются в конфиг.
+    Zoom (mouse wheel) and pan (LMB + drag) are global parameters,
+    applied equally to all images and saved in config.
     """
 
     def __init__(self, config, master=None):
@@ -93,12 +95,17 @@ class AvatarWindow:
 
         self._current_tk_image = None
         self._raw_image_cache = {}  # path -> (mtime, PIL.Image RGBA)
+        self._resized_cache = {}  # (path, zoom) -> PIL.Image (optimized rendering)
 
         self._blink_state = None
         self._current_state_key = None
 
         self._closed = False
         self._last_source = None
+        self._current_image_id = None  # Canvas image ID for updating instead of recreate
+
+        # Shaking animation
+        self._shaking_start_time = None
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.bind("<Configure>", self._on_configure)
@@ -111,7 +118,7 @@ class AvatarWindow:
         self.canvas.bind("<B1-Motion>", self._on_pan_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_pan_end)
 
-    # ---- окно ----
+    # ---- window ----
 
     def _on_configure(self, event):
         if event.widget is self.root:
@@ -119,6 +126,7 @@ class AvatarWindow:
             self.config["avatar_window"]["y"] = self.root.winfo_y()
             self.config["avatar_window"]["width"] = self.root.winfo_width()
             self.config["avatar_window"]["height"] = self.root.winfo_height()
+            auto_save(self.config)
 
     def _on_close(self):
         self._closed = True
@@ -127,15 +135,16 @@ class AvatarWindow:
     def is_closed(self):
         return self._closed
 
-    # ---- зум/пан ----
+    # ---- zoom/pan ----
 
     def _set_zoom(self, new_zoom):
         self.zoom = max(ZOOM_MIN, min(ZOOM_MAX, new_zoom))
         self.config["avatar_view"]["zoom"] = self.zoom
+        auto_save(self.config)
 
     def _on_wheel(self, event):
-        # Windows: delta > 0 -> колесо "вперёд" (от себя) -> уменьшить
-        #          delta < 0 -> колесо "назад" (к себе)   -> увеличить
+        # Windows: delta > 0 -> wheel "forward" (away) -> decrease
+        #          delta < 0 -> wheel "backward" (toward) -> increase
         if event.delta > 0:
             self._set_zoom(self.zoom / ZOOM_STEP)
         else:
@@ -162,16 +171,17 @@ class AvatarWindow:
         self.config["avatar_view"]["pan_x"] = self.pan_x
         self.config["avatar_view"]["pan_y"] = self.pan_y
         self._redraw_current()
+        auto_save(self.config)
 
     def _on_pan_end(self, _event):
         self._drag_start = None
 
-    # ---- картинки ----
+    # ---- images ----
 
     def _get_raw_image(self, path):
-        """Грузит и кеширует исходную (нерастянутую) картинку по пути.
-        Если путь битый/файл отсутствует — Media Offline того же размера,
-        что и последняя валидная картинка (либо 300x300, если её ещё не было).
+        """Loads and caches original (unstretched) image by path.
+        If path is broken/file missing — Media Offline of same size
+        as last valid image (or 300x300 if none yet).
         """
         if path:
             try:
@@ -197,9 +207,22 @@ class AvatarWindow:
         self._raw_image_cache[cache_key] = (mtime, img)
         return img
 
+    def _get_resized_image(self, raw, zoom):
+        """Gets cached resized image for given zoom level, or creates new one."""
+        cache_key = (id(raw), zoom)  # Use id of raw image as key
+        cached = self._resized_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        w = max(1, int(raw.width * zoom))
+        h = max(1, int(raw.height * zoom))
+        resized = raw.resize((w, h), Image.LANCZOS)
+        self._resized_cache[cache_key] = resized
+        return resized
+
     def _should_blink_now(self, state):
-        """Управляет индивидуальным таймером моргания для активного состояния.
-        Если у состояния не указан blink — моргание не происходит вообще.
+        """Controls individual blink timer for active state.
+        If state has no blink specified — no blinking happens.
         """
         if not state or not state.get("blink"):
             self._blink_state = None
@@ -235,8 +258,8 @@ class AvatarWindow:
         return False
 
     def render(self, state):
-        """Отрисовывает текущее состояние (или idle-конфиг, если state=None).
-        Вызывать на каждый тик из главного цикла.
+        """Renders current state (or idle config if state=None).
+        Call on every tick from main loop.
         """
         if self._closed:
             return
@@ -254,25 +277,47 @@ class AvatarWindow:
         path = source.get("blink") if show_blink else source.get("normal")
 
         raw = self._get_raw_image(path)
-
-        w = max(1, int(raw.width * self.zoom))
-        h = max(1, int(raw.height * self.zoom))
-        resized = raw.resize((w, h), Image.LANCZOS)
+        resized = self._get_resized_image(raw, self.zoom)
 
         tk_img = ImageTk.PhotoImage(resized)
-        self._current_tk_image = tk_img  # держим ссылку, иначе tkinter соберёт мусор
+        self._current_tk_image = tk_img  # keep reference, otherwise tkinter will garbage collect
 
         canvas_w = max(self.canvas.winfo_width(), 1)
         canvas_h = max(self.canvas.winfo_height(), 1)
-        cx = canvas_w // 2 + self.pan_x
-        cy = canvas_h // 2 + self.pan_y
 
-        self.canvas.delete("all")
-        self.canvas.create_image(cx, cy, image=tk_img, anchor="center")
+        # Apply shaking offset (only for active states, not idle)
+        shaking_cfg = self.config.get("shaking", {})
+        is_idle = (source is self.config["idle"])
+        if shaking_cfg.get("enabled", False) and not is_idle:
+            if self._shaking_start_time is None:
+                self._shaking_start_time = time.monotonic()
+
+            elapsed = time.monotonic() - self._shaking_start_time
+            amplitude = shaking_cfg.get("amplitude", 10)
+            speed = shaking_cfg.get("speed", 5)
+
+            # Circular motion (infinity/eight)
+            offset_x = amplitude * math.sin(elapsed * speed)
+            offset_y = amplitude * math.cos(elapsed * speed)
+        else:
+            self._shaking_start_time = None
+            offset_x = 0
+            offset_y = 0
+
+        cx = canvas_w // 2 + self.pan_x + offset_x
+        cy = canvas_h // 2 + self.pan_y + offset_y
+
+        # Update existing image instead of recreate to avoid freezes
+        if self._current_image_id is None:
+            self.canvas.delete("all")
+            self._current_image_id = self.canvas.create_image(cx, cy, image=tk_img, anchor="center")
+        else:
+            self.canvas.coords(self._current_image_id, cx, cy)
+            self.canvas.itemconfig(self._current_image_id, image=tk_img)
 
     def update_idle(self):
-        """Обновляет UI-цикл tkinter без блокировки (вызывать вместо mainloop
-        при самостоятельном тестировании без общего master-цикла)."""
+        """Updates tkinter UI loop without blocking (call instead of mainloop
+        when testing independently without common master loop)."""
         if not self._closed:
             self.root.update_idletasks()
             self.root.update()

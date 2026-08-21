@@ -20,7 +20,7 @@ from config import (
     IDLE_TIMEOUT_DEFAULT,
     is_state_complete,
     new_state,
-    save_config,
+    auto_save,
 )
 from list_device import get_devices, pick_default_from
 from scale_geometry import (
@@ -482,6 +482,7 @@ class ControlPanel(ctk.CTk):
     def _on_language_changed(self, value):
         self.config["language"] = LANG_RU if value == "RU" else LANG_EN
         self._apply_language()
+        auto_save(self.config)
 
     # ---- секции UI ----
 
@@ -554,8 +555,11 @@ class ControlPanel(ctk.CTk):
             logger.error("on_device_selected не задан — переключение устройства не будет применено.")
             return
 
+        self.config["device_name"] = name
+
         logger.info("Передаю устройство '%s' (id=%s) в on_device_selected", device["name"], device["id"])
         self.on_device_selected(device)
+        auto_save(self.config)
 
     def _refresh_devices(self):
         current_name = self.device_var.get()
@@ -628,10 +632,69 @@ class ControlPanel(ctk.CTk):
             self.idle_timeout_var, IDLE_TIMEOUT_DEFAULT
         ))
 
+    def _build_shaking_section(self, parent):
+        lbl = ctk.CTkLabel(parent, text="Shaking")
+        lbl.pack(anchor="w", padx=5, pady=(5, 0))
+
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(fill="x", padx=5, pady=5)
+
+        # Enable checkbox
+        self.shaking_enabled_var = tk.BooleanVar(value=self.config["shaking"].get("enabled", False))
+        shaking_check = ctk.CTkCheckBox(frame, text="Enable", variable=self.shaking_enabled_var, command=self._on_shaking_enabled_changed)
+        shaking_check.pack(anchor="w")
+
+        # Amplitude input
+        amp_row = ctk.CTkFrame(frame, fg_color="transparent")
+        amp_row.pack(fill="x", pady=(5, 0))
+        amp_lbl = ctk.CTkLabel(amp_row, text="Amplitude (px):")
+        amp_lbl.pack(side="left")
+        self.shaking_amplitude_var = tk.StringVar(value=str(self.config["shaking"].get("amplitude", 10)))
+        amp_entry = ctk.CTkEntry(amp_row, textvariable=self.shaking_amplitude_var, width=80)
+        amp_entry.pack(side="right")
+        amp_entry.bind("<FocusOut>", lambda e: self._on_shaking_amplitude_changed())
+
+        # Speed input (called "Force" in UI)
+        speed_row = ctk.CTkFrame(frame, fg_color="transparent")
+        speed_row.pack(fill="x", pady=(5, 0))
+        speed_lbl = ctk.CTkLabel(speed_row, text="Force:")
+        speed_lbl.pack(side="left")
+        self.shaking_speed_var = tk.StringVar(value=str(self.config["shaking"].get("speed", 5)))
+        speed_entry = ctk.CTkEntry(speed_row, textvariable=self.shaking_speed_var, width=80)
+        speed_entry.pack(side="right")
+        speed_entry.bind("<FocusOut>", lambda e: self._on_shaking_speed_changed())
+
+    def _on_shaking_enabled_changed(self):
+        self.config["shaking"]["enabled"] = self.shaking_enabled_var.get()
+        auto_save(self.config)
+
+    def _on_shaking_amplitude_changed(self):
+        try:
+            value = int(self.shaking_amplitude_var.get())
+            if 1 <= value <= 50:
+                self.config["shaking"]["amplitude"] = value
+                auto_save(self.config)
+        except ValueError:
+            pass
+
+    def _on_shaking_speed_changed(self):
+        try:
+            value = int(self.shaking_speed_var.get())
+            if 1 <= value <= 20:
+                self.config["shaking"]["speed"] = value
+                auto_save(self.config)
+        except ValueError:
+            pass
+
     def _apply_default_on_blur(self, var, default_value):
         """Если поле осталось пустым при потере фокуса — подставляет дефолт."""
         if var.get().strip() == "":
             var.set(str(default_value))
+        try:
+            self.config["idle_timeout"] = float(var.get())
+            auto_save(self.config)
+        except ValueError:
+            pass
 
     def _build_scale_frames(self):
         container = ctk.CTkFrame(self)
@@ -671,12 +734,13 @@ class ControlPanel(ctk.CTk):
     def _select_mode(self, mode):
         self.current_mode = mode
         self.config["mode"] = mode
+        auto_save(self.config)
 
         for m, canvas in self.scale_canvases.items():
             canvas.pack_forget()
         self.scale_canvases[mode].pack(fill="x", padx=5, pady=5)
 
-        # Показываем/скрываем предупреждения для экспериментальных режимов
+        # Show/hide experimental mode warnings
         for m, warning in self.experimental_warnings.items():
             if warning is not None:
                 warning.pack_forget()
@@ -693,11 +757,14 @@ class ControlPanel(ctk.CTk):
     def _build_point_and_idle_container(self):
         self.point_frame = ctk.CTkFrame(self)   # настройки выбранной точки (сверху, когда есть выбор)
         self.idle_frame = ctk.CTkFrame(self)    # настройки idle (снизу всегда; наверху, если ничего не выбрано)
+        self.shaking_frame = ctk.CTkFrame(self)  # настройки шейкинга
 
         self._build_detail_panel(self.point_frame)
         self._build_idle_section(self.idle_frame)
+        self._build_shaking_section(self.shaking_frame)
 
         self.idle_frame.pack(fill="x", padx=10, pady=5)
+        self.shaking_frame.pack(fill="x", padx=10, pady=5)
 
     def _build_detail_panel(self, parent):
         name_lbl = ctk.CTkLabel(parent, text="")
@@ -866,6 +933,7 @@ class ControlPanel(ctk.CTk):
         self._state_dirty = True
         self._refresh_image_buttons(state)
         self._update_save_button_state(state)
+        auto_save(self.config)
 
     def _on_detail_name_changed(self, *_args):
         if self._populating:
@@ -875,6 +943,7 @@ class ControlPanel(ctk.CTk):
             state["name"] = self.detail_name_var.get()
             self._state_dirty = True
             self._update_save_button_state(state)
+            auto_save(self.config)
 
     def _on_blink_settings_changed(self, *_args):
         if self._populating:
@@ -894,6 +963,7 @@ class ControlPanel(ctk.CTk):
             state["blink_duration_ms"] = int(self.blink_duration_var.get())
         except ValueError:
             pass
+        auto_save(self.config)
         self._state_dirty = True
         self._update_save_button_state(state)
 
@@ -911,6 +981,7 @@ class ControlPanel(ctk.CTk):
         canvas.redraw()
         self._state_dirty = False
         self._update_save_button_state(state)
+        auto_save(self.config)
 
     def _delete_current_state(self):
         state = self._current_editing_state
@@ -919,6 +990,7 @@ class ControlPanel(ctk.CTk):
         canvas = self.scale_canvases[self.current_mode]
         canvas.remove_state(state)
         self._hide_detail_panel()
+        auto_save(self.config)
 
     def _build_idle_section(self, parent):
         lbl = ctk.CTkLabel(parent, text="Idle")  # "idle" не переводится по спецификации
@@ -992,6 +1064,7 @@ class ControlPanel(ctk.CTk):
             idle.setdefault("blink_duration_ms", BLINK_DURATION_DEFAULT_MS)
 
         self._refresh_idle_buttons()
+        auto_save(self.config)
 
     def _refresh_idle_buttons(self):
         idle = self.config["idle"]
@@ -1029,25 +1102,7 @@ class ControlPanel(ctk.CTk):
             idle["blink_duration_ms"] = int(self.idle_blink_duration_var.get())
         except ValueError:
             pass
-
-    def _build_save_button(self):
-        # ВАЖНО: pack(side="bottom") делает эти два ряда НЕЗАВИСИМЫМИ от
-        # порядка "top"-паковки остальных виджетов. idle_frame/point_frame
-        # переупаковываются (forget+pack) при каждом выборе/снятии точки —
-        # без side="bottom" это раньше утаскивало их в самый низ стека,
-        # физически сдвигая блок точки/idle НИЖЕ кнопки и подписи. Порядок
-        # вызовов ниже важен: сначала пакуем то, что должно быть НИЖЕ всего
-        # (подпись), потом то, что должно быть НАД этим (кнопка) — каждый
-        # следующий side="bottom" виджет встаёт выше предыдущего.
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(side="bottom", fill="x", padx=10, pady=(10, 0))
-
-        btn = ctk.CTkButton(
-            row, text="", command=self._save_all,
-            fg_color=COLOR_SAVE_GREEN, hover_color=COLOR_SAVE_GREEN_HOVER,
-        )
-        btn.pack(side="right")
-        self._add_translatable(btn, "save_config_btn")
+        auto_save(self.config)
 
     def _save_all(self):
         self.config["device_name"] = self.device_var.get()
@@ -1057,8 +1112,7 @@ class ControlPanel(ctk.CTk):
         except ValueError:
             pass
 
-        save_config(self.config)
-        messagebox.showinfo(self._tr("saved_title"), self._tr("saved_message"))
+        auto_save(self.config)
 
     # ---- живой сигнал ----
 

@@ -13,7 +13,7 @@ logger = logging.getLogger("audio_process")
 
 
 def detect_audio_settings(device_name):
-    """Определяет оптимальные параметры аудио устройства (частота, размер буфера)."""
+    """Determines optimal audio device parameters (samplerate, blocksize)."""
     device_info = sd.query_devices(device_name)
 
     max_channels = device_info["max_input_channels"]
@@ -39,7 +39,7 @@ def detect_audio_settings(device_name):
 
 
 def get_loudest_channel(audio_block):
-    """Выбирает самый громкий канал из многоканального аудио."""
+    """Selects the loudest channel from multi-channel audio."""
     rms_per_channel = np.sqrt(np.mean(audio_block**2, axis=0))
 
     if audio_block.ndim > 1:
@@ -49,44 +49,44 @@ def get_loudest_channel(audio_block):
     return audio_block, rms_per_channel
 
 
-# ==== Параметры детектора речи и pitch ====
-# Собственный детектор речи заменяет WebRTC VAD (не работает на Windows с русской локалью)
-# Использует комбинацию признаков: RMS, zero-crossing rate, спектральный центроид, дисперсия энергии
-# Pitch определяется через librosa.piptrack (автокорреляция)
+# ==== Voice detector and pitch parameters ====
+# Custom voice detector replaces WebRTC VAD (doesn't work on Windows with Russian locale)
+# Uses combination of features: RMS, zero-crossing rate, spectral centroid, energy variance
+# Pitch is determined via librosa.piptrack (autocorrelation)
 
-VOICE_SAMPLERATE = 16000  # Частота дискретизации для детектора речи
-VOICE_FRAME_MS = 30       # Размер кадра анализа в миллисекундах
+VOICE_SAMPLERATE = 16000  # Sampling rate for voice detector
+VOICE_FRAME_MS = 30       # Analysis frame size in milliseconds
 VOICE_FRAME_SAMPLES = VOICE_SAMPLERATE * VOICE_FRAME_MS // 1000
 
-PITCH_MIN_FREQ = 60   # Минимальная частота человеческого голоса (Гц)
-PITCH_MAX_FREQ = 500  # Максимальная частота человеческого голоса (Гц)
-PITCH_BUF_SIZE = 2048  # Размер буфера для autocorrelation
-PITCH_CONFIDENCE_THRESHOLD = 0.5  # Минимальная уверенность pitch detection
-PITCH_SMOOTHING_FRAMES = 4  # Количество кадров для скользящего среднего
+PITCH_MIN_FREQ = 60   # Minimum human voice frequency (Hz)
+PITCH_MAX_FREQ = 500  # Maximum human voice frequency (Hz)
+PITCH_BUF_SIZE = 2048  # Buffer size for autocorrelation
+PITCH_CONFIDENCE_THRESHOLD = 0.5  # Minimum pitch detection confidence
+PITCH_SMOOTHING_FRAMES = 4  # Number of frames for moving average
 PYIN_FMIN = PITCH_MIN_FREQ
 PYIN_FMAX = PITCH_MAX_FREQ
 PYIN_FRAME_LENGTH = 2048
 PYIN_HOP_LENGTH = 512
 
-# Пороги детектора речи (настроены для максимальной чувствительности)
-RMS_THRESHOLD = 0.003         # Минимальная громкость для анализа
-ZCR_MIN = 0.02                 # Минимальный zero-crossing rate (человеческая речь)
-ZCR_MAX = 0.7                  # Максимальный zero-crossing rate (белый шум выше)
-SPECTRAL_CENTROID_MIN = 150   # Минимальный спектральный центроид (Гц)
-SPECTRAL_CENTROID_MAX = 4500  # Максимальный спектральный центроид (Гц)
-ENERGY_VARIANCE_MAX = 1.0     # Максимальная дисперсия энергии
+# Voice detector thresholds (tuned for maximum sensitivity)
+RMS_THRESHOLD = 0.003         # Minimum loudness for analysis
+ZCR_MIN = 0.02                 # Minimum zero-crossing rate (human speech)
+ZCR_MAX = 0.7                  # Maximum zero-crossing rate (white noise higher)
+SPECTRAL_CENTROID_MIN = 150   # Minimum spectral centroid (Hz)
+SPECTRAL_CENTROID_MAX = 4500  # Maximum spectral centroid (Hz)
+ENERGY_VARIANCE_MAX = 1.0     # Maximum energy variance
 
-VOICE_CONFIRM_FRAMES = 2      # Кадров подряд для подтверждения речи
-SILENCE_CONFIRM_FRAMES = 1    # Кадров подряд для сброса речи
+VOICE_CONFIRM_FRAMES = 2      # Consecutive frames to confirm voice
+SILENCE_CONFIRM_FRAMES = 1    # Consecutive frames to reset voice
 
-EMA_ALPHA = 0.3  # Коэффициент экспоненциального скользящего среднего
-DECAY_TIME_MS = 300  # Время затухания pitch до 0 при отсутствии речи (мс)
+EMA_ALPHA = 0.3  # Exponential moving average coefficient
+DECAY_TIME_MS = 300  # Pitch decay time to 0 when no voice (ms)
 
 
 def compute_zero_crossing_rate(signal):
-    """Вычисляет zero-crossing rate - скорость изменения знака сигнала.
+    """Computes zero-crossing rate - sign change speed of signal.
     
-    Человеческая речь имеет характерные значения (0.02-0.7).
+    Human speech has characteristic values (0.02-0.7).
     """
     if len(signal) < 2:
         return 0.0
@@ -95,9 +95,9 @@ def compute_zero_crossing_rate(signal):
 
 
 def compute_spectral_centroid(signal, samplerate):
-    """Вычисляет спектральный центроид - центр масс спектра.
+    """Computes spectral centroid - center of mass of spectrum.
     
-    Человеческий голос обычно находится в диапазоне 150-4500 Гц.
+    Human voice typically in range 150-4500 Hz.
     """
     if len(signal) < 2:
         return 0.0
@@ -110,9 +110,9 @@ def compute_spectral_centroid(signal, samplerate):
 
 
 def compute_energy_variance(signal, window_size=10):
-    """Вычисляет дисперсию энергии по окнам.
+    """Computes energy variance across windows.
     
-    Речь имеет плавные изменения энергии, резкие скачки указывают на шум.
+    Speech has smooth energy changes, sharp jumps indicate noise.
     """
     if len(signal) < window_size:
         return 0.0
@@ -126,10 +126,10 @@ def compute_energy_variance(signal, window_size=10):
 
 
 def autocorrelation_pitch_detection(signal, samplerate, min_freq=PYIN_FMIN, max_freq=PYIN_FMAX):
-    """Определяет основную частоту через автокорреляцию (librosa.piptrack).
+    """Determines fundamental frequency via autocorrelation (librosa.piptrack).
     
-    Возвращает частоту в Гц и confidence (0-1). Работает как на речевых
-    сигналах, так и на чистых тонах.
+    Returns frequency in Hz and confidence (0-1). Works on both speech
+    signals and pure tones.
     """
     if len(signal) < PYIN_FRAME_LENGTH:
         padded = np.zeros(PYIN_FRAME_LENGTH)
@@ -165,17 +165,17 @@ def autocorrelation_pitch_detection(signal, samplerate, min_freq=PYIN_FMIN, max_
         return 0.0, 0.0
         
     except Exception as e:
-        logging.warning(f"Ошибка в autocorrelation_pitch_detection: {e}")
+        logging.warning(f"Error in autocorrelation_pitch_detection: {e}")
         return 0.0, 0.0
 
 
 class PitchTracker:
-    """Детектор речи и pitch для определения тона голоса.
+    """Voice detector and pitch tracker for determining voice pitch.
     
-    Использует собственную эвристику для отличия речи от случайных звуков
-    (RMS, zero-crossing rate, спектральный центроид, дисперсия энергии).
-    Pitch определяется через librosa.piptrack (автокорреляция).
-    Включает EMA сглаживание и систему затухания (300мс) для плавности.
+    Uses custom heuristic to distinguish voice from random sounds
+    (RMS, zero-crossing rate, spectral centroid, energy variance).
+    Pitch is determined via librosa.piptrack (autocorrelation).
+    Includes EMA smoothing and decay system (300ms) for smoothness.
     """
 
     def __init__(self, device_samplerate):
@@ -198,10 +198,10 @@ class PitchTracker:
         self._decay_start_time = None
 
     def process(self, mono_signal):
-        """Обрабатывает аудио сигнал и возвращает сглаженный pitch в Гц или 0.0.
+        """Processes audio signal and returns smoothed pitch in Hz or 0.0.
         
-        mono_signal — float-массив в родной частоте устройства.
-        Возвращает текущее значение pitch с EMA сглаживанием и decay.
+        mono_signal — float array in device native samplerate.
+        Returns current pitch value with EMA smoothing and decay.
         """
         now = time.monotonic()
         
@@ -224,14 +224,14 @@ class PitchTracker:
         if self._smoothing:
             moving_avg = sum(self._smoothing) / len(self._smoothing)
             
-            # EMA сглаживание для уменьшения скачков тона
+            # EMA smoothing to reduce pitch jumps
             if not self._ema_initialized:
                 self._ema_pitch = moving_avg
                 self._ema_initialized = True
             else:
                 self._ema_pitch = EMA_ALPHA * moving_avg + (1 - EMA_ALPHA) * self._ema_pitch
             
-            # Система затухания (decay) для плавного падения до 0
+            # Decay system for smooth fall to 0
             if self._ema_pitch > 0:
                 self._last_nonzero_pitch = self._ema_pitch
                 self._last_nonzero_time = now
@@ -260,10 +260,10 @@ class PitchTracker:
             return 0.0
 
     def _process_frame(self, frame):
-        """Анализирует один кадр и определяет, является ли он речью.
+        """Analyzes one frame and determines if it's speech.
         
-        Использует комбинацию признаков для отличия человеческого голоса
-        от случайных звуков (скрипы, треск, щелчки).
+        Uses combination of features to distinguish human voice
+        from random sounds (creaks, crackling, clicks).
         """
         rms = np.sqrt(np.mean(frame ** 2))
         zcr = compute_zero_crossing_rate(frame)
@@ -278,14 +278,14 @@ class PitchTracker:
         )
 
         if not is_voice:
-            # Требуем несколько кадров тишины подряд перед сбросом
+            # Require multiple consecutive silence frames before reset
             self._silence_frame_streak += 1
             self._voice_frame_streak = 0
             if self._silence_frame_streak >= SILENCE_CONFIRM_FRAMES:
                 self._smoothing.clear()
             return
 
-        # Требуем несколько кадров речи подряд для подтверждения
+        # Require multiple consecutive voice frames for confirmation
         self._voice_frame_streak += 1
         self._silence_frame_streak = 0
         if self._voice_frame_streak < VOICE_CONFIRM_FRAMES:
@@ -307,7 +307,7 @@ class PitchTracker:
 
 
 class AudioEngine:
-    """Аудио-поток для реального времени определения RMS и pitch."""
+    """Real-time audio stream for RMS and pitch detection."""
 
     def __init__(self, device_name):
         self.device_name = device_name
@@ -318,7 +318,7 @@ class AudioEngine:
         self.channels = min(self.max_channels, 2)
 
         logger.info(
-            "AudioEngine создан: device=%s, samplerate=%d, blocksize=%d, channels=%d",
+            "AudioEngine created: device=%s, samplerate=%d, blocksize=%d, channels=%d",
             device_name, self.samplerate, self.blocksize, self.channels,
         )
 
@@ -338,7 +338,7 @@ class AudioEngine:
         self._stream = None
 
     def _callback(self, indata, frames, time_info, status):
-        """Callback функции sounddevice для каждого аудио блока."""
+        """sounddevice callback for each audio block."""
         self._last_callback_at = time.monotonic()
         now = time.monotonic()
 
@@ -349,10 +349,10 @@ class AudioEngine:
             signal, rms = get_loudest_channel(indata)
             pitch = self._pitch_tracker.process(signal.astype(np.float32))
         except Exception:
-            logger.exception("Ошибка при анализе аудио-блока")
+            logger.exception("Error during audio block analysis")
             return
 
-        # Система затухания (decay) для RMS
+        # RMS decay system
         if rms > 0:
             self._last_nonzero_rms = rms
             self._last_nonzero_rms_time = now
@@ -379,11 +379,11 @@ class AudioEngine:
             self._latest_pitch = float(pitch)
 
     def start(self):
-        """Запускает аудио поток."""
+        """Starts audio stream."""
         if self._stream is not None:
             return
 
-        logger.info("Открываю InputStream для устройства %s...", self.device_name)
+        logger.info("Opening InputStream for device %s...", self.device_name)
         self._stream = sd.InputStream(
             device=self.device_name,
             samplerate=self.samplerate,
@@ -393,14 +393,14 @@ class AudioEngine:
         )
         self._stream.start()
         self._started_at = time.monotonic()
-        logger.info("Поток запущен для устройства %s", self.device_name)
+        logger.info("Stream started for device %s", self.device_name)
 
     def stop(self):
-        """Останавливает аудио поток."""
+        """Stops audio stream."""
         if self._stream is None:
             return
 
-        logger.info("Останавливаю поток для устройства %s", self.device_name)
+        logger.info("Stopping stream for device %s", self.device_name)
         self._stream.stop()
         self._stream.close()
         self._stream = None
@@ -410,10 +410,10 @@ class AudioEngine:
         self._rms_decay_start_time = None
 
     def is_alive(self, timeout=2.5):
-        """Проверяет, активен ли аудио поток.
+        """Checks if audio stream is active.
         
-        Callback вызывается постоянно (в т.ч. на тишине), поэтому
-        долгое отсутствие вызовов - признак мёртвого потока.
+        Callback is called constantly (including on silence), so
+        long absence of calls indicates dead stream.
         """
         if self._stream is None or self._started_at is None:
             return False
@@ -426,7 +426,7 @@ class AudioEngine:
         return (now - self._last_callback_at) < timeout
 
     def get_latest(self):
-        """Потокобезопасно возвращает (rms, pitch) — вызывать из GUI-потока."""
+        """Thread-safely returns (rms, pitch) — call from GUI thread."""
         with self._lock:
             return self._latest_rms, self._latest_pitch
 

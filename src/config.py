@@ -1,14 +1,22 @@
 import json
 import os
+import sys
 import uuid
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+# Determine config path (works in both script and exe mode)
+if getattr(sys, 'frozen', False):
+    # Running as exe (PyInstaller)
+    exe_dir = os.path.dirname(sys.executable)
+    CONFIG_PATH = os.path.join(exe_dir, "config.json")
+else:
+    # Running as script
+    CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-# ---- Дефолты ----
-IDLE_TIMEOUT_DEFAULT = 0.3          # сек, задержка перед переходом в idle
-BLINK_INTERVAL_MIN_DEFAULT = 2.0    # сек
-BLINK_INTERVAL_MAX_DEFAULT = 6.0    # сек
-BLINK_DURATION_DEFAULT_MS = 150     # мс
+# ---- Defaults ----
+IDLE_TIMEOUT_DEFAULT = 0.3          # sec, delay before idle transition
+BLINK_INTERVAL_MIN_DEFAULT = 2.0    # sec
+BLINK_INTERVAL_MAX_DEFAULT = 6.0    # sec
+BLINK_DURATION_DEFAULT_MS = 150     # ms
 
 MAX_STATES = 10
 
@@ -31,9 +39,8 @@ def _default_blink_block():
 
 
 def default_config():
-    """Полная структура конфига со всеми дефолтами. Используется при первом
-    запуске (файла ещё нет) и как основа для докладывания недостающих ключей
-    в уже существующий, но неполный конфиг (например после апдейта проекта).
+    """Full config structure with all defaults. Used on first run (no file yet)
+    and as base for adding missing keys to existing config (e.g. after update).
     """
     return {
         "device_name": None,
@@ -57,14 +64,18 @@ def default_config():
             "pan_x": 0,
             "pan_y": 0,
         },
+        "shaking": {
+            "enabled": False,
+            "amplitude": 10,
+            "speed": 5,
+        },
     }
 
 
 def new_state(loud_db=None, pitch_hz=None):
-    """Создаёт новый черновик состояния. name/normal заполняются пользователем
-    в UI и обязательны для того, чтобы черновик стал полноценным состоянием
-    (см. is_state_complete). loud_db/pitch_hz — координата точки/порога,
-    в зависимости от режима могут быть не обе заданы.
+    """Creates a new state draft. name/normal are filled by user in UI and are
+    required for the draft to become a full state (see is_state_complete).
+    loud_db/pitch_hz — coordinate/threshold, depending on mode both may not be set.
     """
     state = _default_blink_block()
     state.update(
@@ -79,15 +90,14 @@ def new_state(loud_db=None, pitch_hz=None):
 
 
 def is_state_complete(state):
-    """Состояние можно сохранить, только если заполнены имя и normal-картинка."""
+    """State can be saved only if name and normal image are filled."""
     return bool(state.get("name", "").strip()) and bool(state.get("normal"))
 
 
 def _merge_defaults(loaded, defaults):
-    """Рекурсивно докладывает отсутствующие ключи из defaults в loaded,
-    не трогая уже существующие значения. Нужно, чтобы старый config.json
-    (сохранённый до появления новых полей, например после удаления ASIO)
-    не ломал программу KeyError'ами.
+    """Recursively adds missing keys from defaults to loaded, without touching
+    existing values. Needed so old config.json (saved before new fields, e.g. after ASIO removal)
+    doesn't break the program with KeyErrors.
     """
     if not isinstance(loaded, dict):
         return defaults
@@ -102,8 +112,8 @@ def _merge_defaults(loaded, defaults):
 
 
 def load_config(path=CONFIG_PATH):
-    """Загружает конфиг с диска. Если файла нет или он повреждён — создаёт
-    новый с дефолтами и сразу сохраняет его на диск.
+    """Loads config from disk. If file doesn't exist or is corrupted — creates
+    new one with defaults and saves it immediately.
     """
     if not os.path.exists(path):
         config = default_config()
@@ -129,3 +139,8 @@ def save_config(config, path=CONFIG_PATH):
 
 def can_add_state(config, mode):
     return len(config["states"][mode]) < MAX_STATES
+
+
+def auto_save(config):
+    """Automatically saves config to disk. Call after any configuration change."""
+    save_config(config)

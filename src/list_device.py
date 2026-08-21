@@ -7,8 +7,8 @@ def refresh_devices():
 
 
 def get_devices():
-    """Список входных устройств (только WASAPI), отсортированный по алфавиту.
-    ASCII-имена идут раньше не-ASCII (например кириллических).
+    """List of input devices (WASAPI only), sorted alphabetically.
+    ASCII names come before non-ASCII (e.g. Cyrillic).
     """
     refresh_devices()
 
@@ -45,10 +45,10 @@ def get_devices():
 
 
 def find_device_by_name(saved_name):
-    """Ищет устройство по сохранённому в конфиге имени.
+    """Finds device by name saved in config.
 
-    Возвращает словарь устройства (как в get_devices()) или None, если
-    устройство с таким именем сейчас не подключено/не найдено.
+    Returns device dict (as in get_devices()) or None if device with
+    such name is not currently connected/not found.
     """
     for dev in get_devices():
         if dev["name"] == saved_name:
@@ -57,12 +57,12 @@ def find_device_by_name(saved_name):
 
 
 def _wasapi_default_input_id():
-    """ID устройства, которое сам WASAPI-хостапи считает входом по умолчанию.
+    """ID of device that WASAPI hostapi itself considers default input.
 
-    Надёжнее, чем sd.default.device[0] — тот глобальный дефолт PortAudio
-    может указывать на устройство в ДРУГОМ хост-API (не WASAPI), и тогда
-    его id просто не найдётся в нашем WASAPI-only списке устройств, из-за
-    чего выбор постоянно проваливался до "первого по алфавиту".
+    More reliable than sd.default.device[0] — that global PortAudio default
+    may point to device in ANOTHER host-API (not WASAPI), and then its id
+    simply won't be found in our WASAPI-only device list, causing selection
+    to constantly fall back to "first alphabetically".
     """
     for api in sd.query_hostapis():
         if "WASAPI" in api["name"]:
@@ -73,12 +73,11 @@ def _wasapi_default_input_id():
 
 
 def pick_default_from(devices):
-    """Выбирает системное устройство по умолчанию ИЗ УЖЕ ПОЛУЧЕННОГО списка
-    devices (без повторного опроса звуковой системы через get_devices()).
+    """Selects system default device FROM ALREADY OBTAINED list
+    devices (without re-querying audio system via get_devices()).
 
-    Порядок предпочтений: WASAPI-дефолт -> глобальный дефолт PortAudio ->
-    первое устройство в списке (крайний случай, если вообще ничего не
-    удалось сопоставить).
+    Preference order: WASAPI default -> global PortAudio default ->
+    first device in list (extreme case if nothing could be matched).
     """
     if not devices:
         return None
@@ -94,24 +93,22 @@ def pick_default_from(devices):
 
 
 def get_system_default_device():
-    """Возвращает системное устройство ввода по умолчанию (или первое из
-    списка, если системный дефолт почему-то не входит в отфильтрованный
-    список WASAPI-устройств). Делает собственный опрос устройств — для
-    случаев, когда под рукой ещё нет свежего списка (см. pick_default_from
-    для повторного использования уже полученного списка).
+    """Returns system default input device (or first from list if system
+    default for some reason isn't in filtered WASAPI device list).
+    Does its own device query — for cases when fresh list isn't available yet
+    (see pick_default_from for reusing already obtained list).
     """
     return pick_default_from(get_devices())
 
 
 def resolve_device(saved_name):
-    """Определяет, какое устройство использовать при старте программы.
+    """Determines which device to use on program start.
 
-    Если saved_name найден среди текущих устройств — используем его.
-    Если нет (устройство отключено/переименовано) — откатываемся на
-    системное устройство ввода по умолчанию и сообщаем об этом через
-    warning (второй элемент в возвращаемом кортеже).
+    If saved_name is found among current devices — use it.
+    If not (device disconnected/renamed) — fall back to system default
+    input device and report this via warning (second element in returned tuple).
 
-    Возвращает (device_dict, warning_message_or_None).
+    Returns (device_dict, warning_message_or_None).
     """
     if saved_name:
         device = find_device_by_name(saved_name)
@@ -121,13 +118,13 @@ def resolve_device(saved_name):
     default_device = get_system_default_device()
 
     if default_device is None:
-        raise RuntimeError("Не найдено ни одного подходящего устройства ввода.")
+        raise RuntimeError("No suitable input device found.")
 
     warning = None
     if saved_name:
         warning = (
-            f"Сохранённое устройство '{saved_name}' не найдено. "
-            f"Используется устройство по умолчанию: '{default_device['name']}'."
+            f"Saved device '{saved_name}' not found. "
+            f"Using default device: '{default_device['name']}'."
         )
 
     return default_device, warning
