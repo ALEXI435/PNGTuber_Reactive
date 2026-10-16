@@ -6,10 +6,6 @@
 
 PNGTube Ultimate is a program for creating virtual PNG avatars with the ability to change the displayed image based on **volume**, **pitch**, or a combination of both.
 
-## WARNING
-
-You can now see the shaking settings in the program. They are currently NOT WORKING. Do not touch these settings. Once everything is back to normal, this warning will disappear.
-
 ## Features
 
 * 3 operating modes: **Volume**, **Pitch**, and **Volume + Pitch**
