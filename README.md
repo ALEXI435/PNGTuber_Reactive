@@ -1,6 +1,6 @@
 # PNGTuber-Reactive
 
-[![Download](https://img.shields.io/github/v/release/ALEXI435/PNGTube-Ultimate?label=Download&style=for-the-badge&cacheSeconds=0)](https://github.com/ALEXI435/PNGTube-Ultimate/releases/latest)
+[![Download](https://shields.io)](https://github.com/releases/latest)
 
 ## About
 
